@@ -73,6 +73,7 @@ h1 {
     cursor: pointer;
     color: white;
     font-weight: bold;
+    user-select: none;
 }
 
 .game_canvas {
