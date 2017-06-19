@@ -8,9 +8,257 @@ const Direction = {
 }
 
 const GameStatus = {
-  Unknown: "unknown",
+  InProgress: "inProgress",
   Won: "won",
-  Lose: "lose",
+  Continued: "continued",
+  Lost: "lost",
+}
+
+const TileStatus = {
+  Empty: "empty",
+  Spawned: "spawned",
+  Still: "still",
+  Moved: "moved",
+  Merged: "merged",
+}
+
+let MathUtils = {
+  randomInRange: function(n) {
+    return Math.min(n - 1, Math.floor(Math.random() * n));
+  }
+}
+
+class Tile {
+  constructor(index) {
+    this.index = index;
+    this.reset();
+  }
+
+  reset() {
+    this.level = null;
+    this.prevIndex = null;
+    this.prevLevel = null;
+    this.status = TileStatus.Empty;
+  }
+
+  get isEmpty() {
+    return (this.status == TileStatus.Empty);
+  }
+
+  get ableToMerge() {
+    return (this.status != TileStatus.Merged && this.status != TileStatus.Empty);
+  }
+
+  get scoreValue() {
+    if (this.isEmpty) {
+      return null;
+    } else {
+      return Math.pow(2, this.level);
+    }
+  }
+
+  prepareForMove() {
+    if (!this.isEmpty) {
+      this.prevIndex = [this.index];
+      this.prevLevel = [this.level];
+      this.status = TileStatus.Still;
+    }
+  }
+
+  spawn() {
+    // 90% chance to get 2 and 10% chance to get 4
+    this.level = 1 + Math.floor(MathUtils.randomInRange(10) / 9);
+    this.status = TileStatus.Spawned;
+  }
+
+  mergeWith(tile) {
+    if (!this.isEmpty) {
+      tile.level++;
+      tile.prevIndex.push(this.prevIndex[0]);
+      tile.prevLevel.push(this.prevLevel[0]);
+      tile.status = TileStatus.Merged;
+      this.reset();
+    }
+  }
+
+  moveTo(tile) {
+    if (!this.isEmpty) {
+      tile.level = this.level;
+      tile.prevLevel = this.prevLevel;
+      tile.prevIndex = this.prevIndex;
+      tile.status = TileStatus.Moved;
+      this.reset();
+    }
+  }
+
+  equals(tile) {
+    return (this.index === tile.index && this.level === tile.level);
+  }
+
+  clone() {
+    let clonedTile = new Tile(this.index);
+    clonedTile.level = this.level;
+    clonedTile.prevLevel = this.prevLevel;
+    clonedTile.prevIndex = this.prevIndex;
+    clonedTile.status = this.status;
+    return clonedTile;
+  }
+}
+
+class GameState {
+  constructor(rows, columns, targetTileLevel) {
+    this.rows = rows;
+    this.columns = columns;
+    this.targetTileLevel = targetTileLevel;
+    this.tiles = [];
+    for (let index = 0; index < this.boardSize; index++) {
+      this.tiles.push(new Tile(index));
+    }
+    this.score = 0;
+    this.status = GameStatus.InProgress;
+    this.spawnTile();
+    this.spawnTile();
+  }
+
+  get boardSize() {
+    return (this.rows * this.columns);
+  }
+
+  isInsideBoard(index) {
+    return (0 <= index && index < this.boardSize);
+  }
+
+  areNeighboring(index1, index2) {
+    const dRow = Math.floor(index2 / this.columns) - Math.floor(index1 / this.columns);
+    const dCol = index2 % this.columns - index1 % this.columns;
+    return (Math.abs(dRow) == 1 && Math.abs(dCol) == 0 || Math.abs(dRow) == 0 && Math.abs(dCol) == 1);
+  }
+
+  // returns true if there are no empty tiles on board
+  get isFull() {
+    let result = true;
+    for (let index = 0; index < this.boardSize; index++) {
+      if (this.tiles[index].isEmpty) {
+        result = false;
+        break;
+      }
+    }
+    return result;
+  }
+
+  clone() {
+    let clonedState = new GameState(this.rows, this.columns, this.targetTileLevel);
+    clonedState.score = this.score;
+    clonedState.tiles = [];
+    for (let index = 0; index < this.boardSize; index++) {
+      clonedState.tiles.push(this.tiles[index].clone());
+    }
+    return clonedState;
+  }
+
+  equals(state) {
+    let result = (this.score === state.score && this.rows === state.rows && this.columns === state.columns);
+    if (result) {
+      for (let index = 0; index < this.boardSize; index++) {
+        if (!this.tiles[index].equals(state.tiles[index])) {
+          result = false;
+          break;
+        }
+      }
+    }
+    return result;
+  }
+
+  get isGameOver() {
+    let dead = this.isFull;
+    if (dead) {
+      for (let dir in Direction) {
+        if (this.clone().move(Direction[dir])) {
+          dead = false;
+          break;
+        }
+      }
+    }
+    return dead;
+  }
+
+  get hasAchievedGoal() {
+    let won = false;
+    for (let index = 0; index < this.boardSize; index++) {
+      if (this.tiles[index].level >= this.targetTileLevel) {
+        won = true;
+        break;
+      }
+    }
+    return won;
+  }
+
+  updateStatus() {
+    if (this.isGameOver) {
+      this.status = GameStatus.Lost;
+    } else if (this.status == GameStatus.InProgress && this.hasAchievedGoal) {
+      this.status = GameStatus.Won;
+    } else if (this.status == GameStatus.Won) {
+      this.status = GameStatus.Continued;
+    }
+  }
+
+  spawnTile() {
+    if (!this.isFull) {
+      let index;
+      do {
+        index = MathUtils.randomInRange(this.boardSize);
+      } while (!this.tiles[index].isEmpty);
+      this.tiles[index].spawn();
+    }
+  }
+
+  gravitateTile(index, indexChange) {
+    const nextIndex = index + indexChange;
+    let tile = this.tiles[index];
+    let nextTile = this.tiles[nextIndex];
+    if (this.isInsideBoard(nextIndex) && this.areNeighboring(index, nextIndex)) {
+      if (!nextTile.isEmpty) {
+        this.gravitateTile(nextIndex, indexChange);
+      }
+      if (nextTile.isEmpty) {
+        tile.moveTo(nextTile);
+        this.gravitateTile(nextIndex, indexChange);
+      } else if (tile.ableToMerge && nextTile.ableToMerge && tile.level == nextTile.level) {
+        tile.mergeWith(nextTile);
+        this.score += nextTile.scoreValue;
+      }
+    }
+  }
+
+  gravitate(direction) {
+    const indexChange = {
+      right: 1,
+      up: -this.columns,
+      left: -1,
+      down: this.columns,
+    }
+
+    for (let index = 0; index < this.boardSize; index++) {
+      this.tiles[index].prepareForMove();
+    }
+
+    for (let index = 0; index < this.boardSize; index++) {
+      this.gravitateTile(index, indexChange[direction]);
+    }
+  }
+
+  move(direction) {
+    let oldState = this.clone();
+    this.gravitate(direction);
+    if (!this.equals(oldState)) {
+      this.spawnTile();
+      this.updateStatus();
+      return true;
+    } else {
+      return false;
+    }
+  }
 }
 
 class GameGraphics {
@@ -26,13 +274,15 @@ class GameGraphics {
   }
 
   resize() {
-    const maxWidth = window.innerWidth - 100;
-    const maxHeight = window.innerHeight - 100;
+    const maxWidth = window.innerWidth * 0.7;
+    const maxHeight = window.innerHeight * 0.7;
     const ratio = 1 / this.marginToTileSizeRatio;
     const aspectRatio = (1 + this.columns * (1 + ratio)) / (1 + this.rows * (1 + ratio));
     const width = Math.min(maxWidth, aspectRatio * maxHeight);
     const height = width / aspectRatio;
 
+    this.margin = width / (1 + this.columns * (1 + ratio));
+    this.tileSize = this.margin * ratio;
     this.canvas.style.width = width + "px";
     this.canvas.width = width;
     this.canvas.style.height = height + "px";
@@ -90,18 +340,21 @@ class GameGraphics {
   drawBackground() {
     const dx = this.dimensions.x;
     const dy = this.dimensions.y;
-    this.drawRoundRectangle(0, 0, dx, dy, "#BBADA0", dx / 50);
-    const margin = dx / (1 + this.columns * (1 + 1 / this.marginToTileSizeRatio));
-    const tileSize = margin / this.marginToTileSizeRatio;
+    const marginColor = "#BBADA0";
+    this.context.clearRect(0, 0, this.dimensions.x, this.dimensions.y);
+    this.drawRoundRectangle(0, 0, dx, dy, marginColor, dx / 50);
     for (let row = 0; row < this.rows; row++) {
       for (let col = 0; col < this.columns; col++) {
-        this.drawRoundRectangle(margin + col * (tileSize + margin), margin + row * (tileSize + margin), tileSize, tileSize, "#CDC1B4", tileSize / 25);
+        const x = this.margin + col * (this.tileSize + this.margin);
+        const y = this.margin + row * (this.tileSize + this.margin);
+        const emptyTileColor = "#CDC1B4";
+        this.drawRoundRectangle(x, y, this.tileSize, this.tileSize, emptyTileColor, this.tileSize / 25);
       }
     }
   }
 
   getTileColor(tileLevel) {
-    let tileColors = [
+    const tileColors = [
       "#EEE4DA", //2
       "#EDE0C8", //4
       "#F2B179", //8
@@ -121,7 +374,7 @@ class GameGraphics {
   }
 
   getTileText(tileLevel) {
-    let multipliers = ["", "K", "M"];
+    const multipliers = ["", "K", "M"];
     return Math.pow(2, tileLevel % 10).toString() + multipliers[Math.floor(tileLevel / 10)];
   }
 
@@ -132,183 +385,180 @@ class GameGraphics {
       return "#776E65"; // 2 or 4
   }
 
-  drawTile(x, y, size, tileLevel) {
-    let color = this.getTileColor(tileLevel);
-    let text = this.getTileText(tileLevel);
-    let textColor = this.getTileTextColor(tileLevel);
-    this.drawRoundRectangle(x, y, size, size, color, size / 25);
-    this.drawText(x, y, size, size, textColor, text)
+  drawTile(row, col, tileLevel, scale = 1) {
+    const color = this.getTileColor(tileLevel);
+    const text = this.getTileText(tileLevel);
+    const textColor = this.getTileTextColor(tileLevel);
+    const x = this.margin + col * (this.tileSize + this.margin) + this.tileSize / 2;
+    const y = this.margin + row * (this.tileSize + this.margin) + this.tileSize / 2;
+    const size = this.tileSize * scale;
+    this.drawRoundRectangle(x - size / 2, y - size / 2, size, size, color, size / 25);
+    this.drawText(x - size / 2, y - size / 2, size, size, textColor, text)
   }
 
-  drawTiles(tiles) {
-    let dx = this.dimensions.x;
-    let dy = this.dimensions.y;
-    let margin = dx / (1 + this.columns * (1 + 1 / this.marginToTileSizeRatio));
-    let tileSize = margin / this.marginToTileSizeRatio;
+  drawAnimatedTile(tile, animationProgress = 1) {
+    const row = Math.floor(tile.index / this.columns);
+    const col = tile.index % this.columns
+    const movingPhaseEnd = .5;
+    if (tile.status != TileStatus.Empty && tile.status != TileStatus.Spawned) {
+      for (let id = 0; id < tile.prevIndex.length; id++) {
+        const prevRow = Math.floor(tile.prevIndex[id] / this.columns);
+        const prevCol = tile.prevIndex[id] % this.columns;
+        const phaseProgress = Math.min(animationProgress / movingPhaseEnd, 1);
+        const movementProgress = 3 * phaseProgress ** 2 - 2 * phaseProgress ** 3; // Smoothstep
+        const tileRow = prevRow + (row - prevRow) * movementProgress;
+        const tileCol = prevCol + (col - prevCol) * movementProgress;
+        this.drawTile(tileRow, tileCol, tile.prevLevel[id]);
+      }
+    }
+    const appearingPhaseStart = movingPhaseEnd;
+    if (animationProgress > appearingPhaseStart) {
+      const phaseProgress = (animationProgress - appearingPhaseStart) / (1 - appearingPhaseStart);
+      if (tile.status == TileStatus.Spawned) {
+        const scale = phaseProgress;
+        this.drawTile(row, col, tile.level, scale);
+      }
+      if (tile.status == TileStatus.Merged) {
+        const scale = -(phaseProgress ** 2) + phaseProgress + 1;
+        this.drawTile(row, col, tile.level, scale);
+      }
+    }
+  }
+
+  drawTiles(state, animationProgress = 1) {
     for (let row = 0; row < this.rows; row++) {
       for (let col = 0; col < this.columns; col++) {
-        if (tiles[row][col] > 0) {
-          this.drawTile(margin + col * (tileSize + margin), margin + row * (tileSize + margin), tileSize, tiles[row][col]);
+        const index = row * this.columns + col;
+        if (!state.tiles[index].isEmpty) {
+          this.drawAnimatedTile(state.tiles[index], animationProgress);
         }
       }
     }
   }
 
-  showEndGameScreen() {
-    if (this.dead) {
-      // TODO: implement end screen
-    }
-  }
-
-  draw(tiles) {
+  draw(state, animationProgress = 1) {
     this.drawBackground();
-    this.drawTiles(tiles);
+    this.drawTiles(state, animationProgress);
   }
 }
 
-// TODO: rename to GameState
-class GameMechanics {
-  constructor(rows, columns) {
-    this.rows = rows;
-    this.columns = columns;
-    // TODO: make method instead of property emptyTilesCount
-    this.emptyTilesCount = this.rows * this.columns;
-    this.tiles = [];
-    for (let ri = 0; ri < this.rows; ri++) {
-      this.tiles[ri] = [];
-      for (let ci = 0; ci < this.columns; ci++) {
-        this.tiles[ri][ci] = 0;
+class GameAnimationController {
+  constructor(graphics) {
+    this.graphics = graphics;
+    this.animationProgress = 0;
+    this.stateHistory = [];
+    this.prevTime = new Date();
+  }
+
+  addState(state) {
+    this.stateHistory.push(state.clone());
+  }
+
+  get animationStep() {
+    const baseAnimationDuration = 0.2;
+    const time = new Date();
+    const deltaSeconds = (time - this.prevTime) / 1000;
+    const deltaPhase = deltaSeconds / baseAnimationDuration;
+    return (this.stateHistory.length * deltaPhase);
+  }
+
+  advance() {
+    if (this.stateHistory.length != 1 || this.animationProgress != 1) {
+      if (this.animationProgress == 1) {
+        this.animationProgress = 0;
+        this.stateHistory.shift();
+      }
+      this.animationProgress += this.animationStep;
+      if (this.animationProgress > 1) {
+        this.animationProgress = 1;
       }
     }
-    this.score = 0;
-
-    this.spawnTile();
+    this.prevTime = new Date();
   }
 
-  // @returns number in range [0..n)
-  random(n) {
-    return Math.min(n - 1, Math.floor(Math.random() * n));
+  draw() {
+    this.advance();
+    this.graphics.draw(this.stateHistory[0], this.animationProgress);
+  }
+}
+
+class Color {
+  constructor(r, g, b, a) {
+    this.r = r;
+    this.g = g;
+    this.b = b;
+    this.a = a;
   }
 
-  isInsideBoard(row, col) {
-    return (0 <= row && row < this.rows && 0 <= col && col < this.columns);
+  approach(color) {
+    const weight = 24;
+    this.r = (weight * this.r + color.r) / (weight + 1);
+    this.g = (weight * this.g + color.g) / (weight + 1);
+    this.b = (weight * this.b + color.b) / (weight + 1);
+    this.a = (weight * this.a + color.a) / (weight + 1);
   }
 
-  spawnTile() {
-    if (this.emptyTilesCount) {
-      let row;
-      let col;
-      do {
-        row = this.random(this.rows);
-        col = this.random(this.columns);
-      }
-      while (this.tiles[row][col] > 0);
-      // 90% to get 2 and 10% to get 4
-      this.tiles[row][col] = 1 + Math.floor(this.random(10) / 9);
-      this.emptyTilesCount--;
-    }
+  toStyleString() {
+    return "rgba(" +
+      this.r.toFixed() + "," + this.g.toFixed() + "," +
+      this.b.toFixed() + "," + this.a.toFixed(2) + ")";
   }
 
-  gravitateTile(tiles, row, col, dx, dy, updateScore) {
-    let nextRow = row + dy;
-    let nextCol = col + dx;
-    if (this.isInsideBoard(nextRow, nextCol)) {
-      if (tiles[nextRow][nextCol] != 0) {
-        this.gravitateTile(tiles, nextRow, nextCol, dx, dy, updateScore);
-      }
-      if (tiles[nextRow][nextCol] > 0 && tiles[row][col] == tiles[nextRow][nextCol]) {
-        tiles[nextRow][nextCol] += 1;
-        tiles[row][col] = 0;
-        if (updateScore) {
-          // TODO: extract to method
-          // TODO: check score after gravitate finished
-          this.score += Math.pow(2, tiles[nextRow][nextCol]);
-          gameScore.innerHTML = this.score;
-          bestScore.innerHTML = Math.max(bestScore.innerHTML, gameScore.innerHTML);
-          if (tiles[nextRow][nextCol] == 11) {
-            window.alert("You win!");
-          }
-          this.emptyTilesCount++;
-        }
-        tiles[nextRow][nextCol] *= -1;
-      }
-      if (tiles[nextRow][nextCol] == 0) {
-        tiles[nextRow][nextCol] = tiles[row][col];
-        tiles[row][col] = 0;
-        this.gravitateTile(tiles, nextRow, nextCol, dx, dy, updateScore);
-      }
-    }
+  clone() {
+    return new Color(this.r, this.g, this.b, this.a);
   }
+}
 
-  gravitate(tiles, direction, updateScore) {
-    let dir = direction;
-    let dx = { right: 1, up: 0, left: -1, down: 0 };
-    let dy = { right: 0, up: -1, left: 0, down: 1 };
-    let x0 = { right: 0, up: this.columns - 1, left: this.columns - 1, down: 0 };
-    let y0 = { right: this.rows - 1, up: this.rows - 1, left: 0, down: 0 };
-    // Maps to perpendicular direction
-    const perpDirectionMapping = {
-      right: Direction.Up,
-      up: Direction.Left,
-      left: Direction.Down,
-      down: Direction.Right,
+class GameOverlay {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.context = canvas.getContext("2d");
+    this.settings = {
+      inProgress: {
+        textHidden: true,
+        color: new Color(255, 255, 255, 0),
+      },
+      continued: {
+        textHidden: true,
+        color: new Color(255, 255, 255, 0),
+      },
+      won: {
+        textHidden: false,
+        text: "You win!",
+        textColor: "#F8F5F1",
+        color: new Color(237, 194, 46, 0.5),
+      },
+      lost: {
+        textHidden: false,
+        text: "Game over!",
+        textColor: "#776E65",
+        color: new Color(237, 227, 217, 0.5),
+      },
     };
-    let perp = perpDirectionMapping[dir];
-
-    // TODO: Move to method `clone()`, remove updateScore parameter,
-    //  use cloned state to check if game over
-    let newTiles = [];
-    for (let row = 0; row < this.rows; row++) {
-      newTiles[row] = tiles[row].slice();
-    }
-
-    let row = y0[dir];
-    let col = x0[dir];
-    while (row >= 0 && col >= 0 && row < this.rows && col < this.columns) {
-      this.gravitateTile(newTiles, row, col, dx[dir], dy[dir], updateScore);
-      row += dy[perp];
-      col += dx[perp];
-    }
-
-    for (let row = 0; row < this.rows; row++) {
-      for (let col = 0; col < this.columns; col++) {
-        newTiles[row][col] = Math.abs(newTiles[row][col]);
-      }
-    }
-
-    return newTiles;
+    this.setting = this.settings[GameStatus.InProgress];
+    this.color = this.setting.color.clone();
   }
 
-  doMoves(moves) {
-    if (moves.length) {
-      while (moves.length) {
-        let moveDirection = moves.shift();
-        let newTiles = this.gravitate(this.tiles, moveDirection, true);
-        if (newTiles.toString() != this.tiles.toString()) {
-          this.tiles = newTiles;
-          this.spawnTile();
-        }
-      }
-      this.checkForGameOver();
-    }
+  drawText(x, y, width, height, color, text) {
+    this.context.textAlign = "center";
+    this.context.textBaseline = "middle";
+    this.context.fillStyle = color;
+    this.context.font = height + "px Arial";
+    this.context.fillText(text, x, y, width);
   }
 
-  checkForGameOver() {
-    // TODO: remove property dead - method is enough
-    if (!(this.dead)) {
-      this.dead = true;
-      for (let dir in Direction) {
-        let newTiles = this.gravitate(this.tiles, Direction[dir], false);
-        // TODO: extract to method `equals()`
-        if (newTiles.toString() != this.tiles.toString()) {
-          this.dead = false;
-          break;
-        }
-      }
-      if (this.dead) {
-        window.alert("Game over!");
-      }
-      return this.dead;
+  update(status) {
+    this.setting = this.settings[status];
+  }
+
+  draw() {
+    const width = this.canvas.scrollWidth;
+    const height = this.canvas.scrollHeight;
+    this.color.approach(this.setting.color);
+    this.context.fillStyle = this.color.toStyleString();
+    this.context.fillRect(0, 0, width, height);
+    if (!this.setting.textHidden) {
+      this.drawText(width / 2, height / 2, width * 7 / 8, height / 5, this.setting.textColor, this.setting.text);
     }
   }
 }
@@ -317,57 +567,104 @@ class GameInputController {
   constructor() {
     this.moves = [];
     window.addEventListener("keydown", (e) => { this.processKeyboard(e); });
+    this.blockedUntil = new Date();
   }
 
   processKeyboard(e) {
     const key = e.code;
-    const mapping = {
-      "KeyW": Direction.Up,
-      "ArrowUp": Direction.Up,
-      "KeyA": Direction.Left,
-      "ArrowLeft": Direction.Left,
-      "KeyS": Direction.Down,
-      "ArrowDown": Direction.Down,
-      "KeyD": Direction.Right,
-      "ArrowRight": Direction.Right,
-    };
-    const direction = mapping[key];
-    if (direction !== undefined) {
-      this.moves.push(direction);
+    if (new Date() >= this.blockedUntil) {
+      const mapping = {
+        "KeyW": Direction.Up,
+        "ArrowUp": Direction.Up,
+        "KeyA": Direction.Left,
+        "ArrowLeft": Direction.Left,
+        "KeyS": Direction.Down,
+        "ArrowDown": Direction.Down,
+        "KeyD": Direction.Right,
+        "ArrowRight": Direction.Right,
+      };
+      const direction = mapping[key];
+      if (direction !== undefined) {
+        this.moves.push(direction);
+      }
     }
     if (key == "ArrowUp" || key == "ArrowDown") {
       e.preventDefault();
     }
   }
+
+  reset() {
+    this.moves = [];
+  }
+
+  blockForMilliseconds(duration) {
+    this.reset;
+    this.blockedUntil = new Date((new Date()).valueOf() + duration);
+  }
 }
 
 class GameController {
-  constructor(canvas, rows, columns) {
+  constructor(canvas, rows, columns, targetTileLevel) {
+    this.rows = rows;
+    this.columns = columns;
+    this.targetTileLevel = targetTileLevel;
     this.graphics = new GameGraphics(canvas, rows, columns);
-    this.mechanics = new GameMechanics(rows, columns);
+    this.animation = new GameAnimationController(this.graphics);
+    this.overlay = new GameOverlay(canvas);
     this.input = new GameInputController();
-  }
-
-  tick() {
-    this.mechanics.doMoves(this.input.moves);
-    this.graphics.draw(this.mechanics.tiles);
-    window.requestAnimationFrame(() => { this.tick(); });
+    this.bestScore = 0;
+    this.restart();
+    restartButton.addEventListener("mousedown", () => { this.restart(); });
   }
 
   restart() {
-    this.dead = false;
-    this.win = false;
+    this.state = new GameState(this.rows, this.columns, this.targetTileLevel);
+    this.input.reset();
+    this.animation.addState(this.state);
+    this.updateScore();
+  }
+
+  doMoves() {
+    while (this.input.moves.length) {
+      const direction = this.input.moves.shift();
+      if (this.state.move(direction)) {
+        this.animation.addState(this.state);
+      }
+      if (this.state.status == GameStatus.Won) {
+        const keyboardIgnoreTimeMs = 2500;
+        this.input.blockForMilliseconds(keyboardIgnoreTimeMs);
+      }
+    }
+  }
+
+  updateScore() {
+    if (this.score != this.state.score) {
+      this.score = this.state.score
+      gameScore.innerHTML = this.score;
+    }
+    if (this.score > this.bestScore) {
+      this.bestScore = this.score;
+      bestScore.innerHTML = this.bestScore;
+    }
+  }
+
+  tick() {
+    this.doMoves();
+    this.updateScore();
+    this.animation.draw();
+    this.overlay.update(this.state.status);
+    this.overlay.draw();
+    window.requestAnimationFrame(() => { this.tick(); });
   }
 
   start() {
-    this.restart();
     this.tick();
   }
-
 }
 
 function main() {
-  let game = new GameController(gameCanvas, 4, 4);
+  let gameCanvas = document.getElementById("gameCanvas");
+  let game = new GameController(gameCanvas, 4, 4, 11); //4x4 board, 2^11 = 2048 tile to win
   game.start();
 }
 
