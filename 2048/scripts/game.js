@@ -22,6 +22,12 @@ const TileStatus = {
   Merged: "merged",
 }
 
+let MathUtils = {
+  randomInRange: function(n) {
+    return Math.min(n - 1, Math.floor(Math.random() * n));
+  }
+}
+
 class Tile {
   constructor(index) {
     this.index = index;
@@ -43,7 +49,7 @@ class Tile {
     return (this.status != TileStatus.Merged && this.status != TileStatus.Empty);
   }
 
-  get value() {
+  get scoreValue() {
     if (this.isEmpty) {
       return null;
     } else {
@@ -61,7 +67,7 @@ class Tile {
 
   spawn() {
     // 90% chance to get 2 and 10% chance to get 4
-    this.level = 1 + Math.floor(10 * Math.random() / 9);
+    this.level = 1 + Math.floor(MathUtils.randomInRange(10) / 9);
     this.status = TileStatus.Spawned;
   }
 
@@ -89,13 +95,13 @@ class Tile {
     return (this.index === tile.index && this.level === tile.level);
   }
 
-  get copy() {
-    let copiedTile = new Tile(this.index);
-    copiedTile.level = this.level;
-    copiedTile.prevLevel = this.prevLevel;
-    copiedTile.prevIndex = this.prevIndex;
-    copiedTile.status = this.status;
-    return copiedTile;
+  clone() {
+    let clonedTile = new Tile(this.index);
+    clonedTile.level = this.level;
+    clonedTile.prevLevel = this.prevLevel;
+    clonedTile.prevIndex = this.prevIndex;
+    clonedTile.status = this.status;
+    return clonedTile;
   }
 }
 
@@ -112,11 +118,6 @@ class GameState {
     this.status = GameStatus.InProgress;
     this.spawnTile();
     this.spawnTile();
-  }
-
-  // @returns random integer from range [0..n)
-  random(n) {
-    return Math.min(n - 1, Math.floor(Math.random() * n));
   }
 
   get boardSize() {
@@ -145,14 +146,14 @@ class GameState {
     return result;
   }
 
-  get copy() {
-    let copiedState = new GameState(this.rows, this.columns);
-    copiedState.score = this.score;
-    copiedState.tiles = [];
+  clone() {
+    let clonedState = new GameState(this.rows, this.columns, this.targetTileLevel);
+    clonedState.score = this.score;
+    clonedState.tiles = [];
     for (let index = 0; index < this.boardSize; index++) {
-      copiedState.tiles.push(this.tiles[index].copy);
+      clonedState.tiles.push(this.tiles[index].clone());
     }
-    return copiedState;
+    return clonedState;
   }
 
   equals(state) {
@@ -168,11 +169,11 @@ class GameState {
     return result;
   }
 
-  get gameOver() {
+  get isGameOver() {
     let dead = this.isFull;
     if (dead) {
       for (let dir in Direction) {
-        if (this.copy.move(Direction[dir])) {
+        if (this.clone().move(Direction[dir])) {
           dead = false;
           break;
         }
@@ -181,7 +182,7 @@ class GameState {
     return dead;
   }
 
-  get goalReached() {
+  get hasAchievedGoal() {
     let won = false;
     for (let index = 0; index < this.boardSize; index++) {
       if (this.tiles[index].level >= this.targetTileLevel) {
@@ -193,9 +194,9 @@ class GameState {
   }
 
   updateStatus() {
-    if (this.gameOver) {
+    if (this.isGameOver) {
       this.status = GameStatus.Lost;
-    } else if (this.status == GameStatus.InProgress && this.goalReached) {
+    } else if (this.status == GameStatus.InProgress && this.hasAchievedGoal) {
       this.status = GameStatus.Won;
     } else if (this.status == GameStatus.Won) {
       this.status = GameStatus.Continued;
@@ -206,7 +207,7 @@ class GameState {
     if (!this.isFull) {
       let index;
       do {
-        index = this.random(this.boardSize);
+        index = MathUtils.randomInRange(this.boardSize);
       } while (!this.tiles[index].isEmpty);
       this.tiles[index].spawn();
     }
@@ -225,7 +226,7 @@ class GameState {
         this.gravitateTile(nextIndex, indexChange);
       } else if (tile.ableToMerge && nextTile.ableToMerge && tile.level == nextTile.level) {
         tile.mergeWith(nextTile);
-        this.score += nextTile.value;
+        this.score += nextTile.scoreValue;
       }
     }
   }
@@ -248,7 +249,7 @@ class GameState {
   }
 
   move(direction) {
-    let oldState = this.copy;
+    let oldState = this.clone();
     this.gravitate(direction);
     if (!this.equals(oldState)) {
       this.spawnTile();
@@ -273,8 +274,8 @@ class GameGraphics {
   }
 
   resize() {
-    const maxWidth = window.innerWidth - 100;
-    const maxHeight = window.innerHeight - 100;
+    const maxWidth = window.innerWidth * 0.7;
+    const maxHeight = window.innerHeight * 0.7;
     const ratio = 1 / this.marginToTileSizeRatio;
     const aspectRatio = (1 + this.columns * (1 + ratio)) / (1 + this.rows * (1 + ratio));
     const width = Math.min(maxWidth, aspectRatio * maxHeight);
@@ -450,14 +451,15 @@ class GameAnimationController {
   }
 
   addState(state) {
-    this.stateHistory.push(state.copy);
+    this.stateHistory.push(state.clone());
   }
 
   get animationStep() {
     const baseAnimationDuration = 0.2;
     const time = new Date();
-    const FPS = 1000 / (time - this.prevTime);
-    return (this.stateHistory.length / baseAnimationDuration / FPS);
+    const deltaSeconds = (time - this.prevTime) / 1000;
+    const deltaPhase = deltaSeconds / baseAnimationDuration;
+    return (this.stateHistory.length * deltaPhase);
   }
 
   advance() {
@@ -480,6 +482,33 @@ class GameAnimationController {
   }
 }
 
+class Color {
+  constructor(r, g, b, a) {
+    this.r = r;
+    this.g = g;
+    this.b = b;
+    this.a = a;
+  }
+
+  approach(color) {
+    const weight = 24;
+    this.r = (weight * this.r + color.r) / (weight + 1);
+    this.g = (weight * this.g + color.g) / (weight + 1);
+    this.b = (weight * this.b + color.b) / (weight + 1);
+    this.a = (weight * this.a + color.a) / (weight + 1);
+  }
+
+  toStyleString() {
+    return "rgba(" +
+      this.r.toFixed() + "," + this.g.toFixed() + "," +
+      this.b.toFixed() + "," + this.a.toFixed(2) + ")";
+  }
+
+  clone() {
+    return new Color(this.r, this.g, this.b, this.a);
+  }
+}
+
 class GameOverlay {
   constructor(canvas) {
     this.canvas = canvas;
@@ -487,27 +516,27 @@ class GameOverlay {
     this.settings = {
       inProgress: {
         textHidden: true,
-        color: { r: 255, g: 255, b: 255, a: 0 }
+        color: new Color(255, 255, 255, 0),
       },
       continued: {
         textHidden: true,
-        color: { r: 255, g: 255, b: 255, a: 0 }
+        color: new Color(255, 255, 255, 0),
       },
       won: {
         textHidden: false,
         text: "You win!",
         textColor: "#F8F5F1",
-        color: { r: 237, g: 194, b: 46, a: 0.5 }
+        color: new Color(237, 194, 46, 0.5),
       },
       lost: {
         textHidden: false,
         text: "Game over!",
         textColor: "#776E65",
-        color: { r: 237, g: 227, b: 217, a: 0.5 }
+        color: new Color(237, 227, 217, 0.5),
       },
     };
     this.setting = this.settings[GameStatus.InProgress];
-    this.color = { r: 255, g: 255, b: 255, a: 0 };
+    this.color = this.setting.color.clone();
   }
 
   drawText(x, y, width, height, color, text) {
@@ -518,14 +547,6 @@ class GameOverlay {
     this.context.fillText(text, x, y, width);
   }
 
-  updateColor() {
-    const weight = 24;
-    this.color.r = (weight * this.color.r + this.setting.color.r) / (weight + 1);
-    this.color.g = (weight * this.color.g + this.setting.color.g) / (weight + 1);
-    this.color.b = (weight * this.color.b + this.setting.color.b) / (weight + 1);
-    this.color.a = (weight * this.color.a + this.setting.color.a) / (weight + 1);
-  }
-
   update(status) {
     this.setting = this.settings[status];
   }
@@ -533,12 +554,8 @@ class GameOverlay {
   draw() {
     const width = this.canvas.scrollWidth;
     const height = this.canvas.scrollHeight;
-    this.updateColor();
-    this.context.fillStyle = "rgba(" +
-      this.color.r.toFixed() + "," +
-      this.color.g.toFixed() + "," +
-      this.color.b.toFixed() + "," +
-      this.color.a.toFixed(2) + ")";
+    this.color.approach(this.setting.color);
+    this.context.fillStyle = this.color.toStyleString();
     this.context.fillRect(0, 0, width, height);
     if (!this.setting.textHidden) {
       this.drawText(width / 2, height / 2, width * 7 / 8, height / 5, this.setting.textColor, this.setting.text);
@@ -580,7 +597,7 @@ class GameInputController {
     this.moves = [];
   }
 
-  blockFor(duration = 1000) {
+  blockForMilliseconds(duration) {
     this.reset;
     this.blockedUntil = new Date((new Date()).valueOf() + duration);
   }
@@ -614,8 +631,8 @@ class GameController {
         this.animation.addState(this.state);
       }
       if (this.state.status == GameStatus.Won) {
-        const keyboardIgnoreTime = 2500; //ms
-        this.input.blockFor(keyboardIgnoreTime);
+        const keyboardIgnoreTimeMs = 2500;
+        this.input.blockForMilliseconds(keyboardIgnoreTimeMs);
       }
     }
   }
@@ -632,7 +649,6 @@ class GameController {
   }
 
   tick() {
-    // this.input.moves.push(["up", "left", "right"][Math.floor(Math.random() * 3)]);
     this.doMoves();
     this.updateScore();
     this.animation.draw();
@@ -647,6 +663,7 @@ class GameController {
 }
 
 function main() {
+  let gameCanvas = document.getElementById("gameCanvas");
   let game = new GameController(gameCanvas, 4, 4, 11); //4x4 board, 2^11 = 2048 tile to win
   game.start();
 }
