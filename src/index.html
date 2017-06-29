@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>2048</title>
+  <meta charset="utf-8">
+  <!-- build:css styles/main.css -->
+  <link rel="stylesheet" href="styles/index.css">
+  <!-- endbuild -->
+</head>
+
+<body>
+  <div class="wrapper">
+    <div class="header">
+      <h1 class="title">2048</h1>
+      <div class="score_container">
+        best
+        <div class="score" id="bestScore">0</div>
+      </div>
+      <div class="score_container">
+        score
+        <div class="score" id="gameScore">0</div>
+      </div>
+      <div class="clearfix"></div>
+    </div>
+    <div class="above_game">
+      <div class="restart_button" id="restartButton">
+        New Game
+      </div>
+      <p class="above_game_text">
+        Join the numbers and get to the
+        <strong>2048 tile!</strong>
+      </p>
+      <div class="clearfix"></div>
+    </div>
+    <canvas class="game_canvas" id="gameCanvas">Your browser does not support canvas.</canvas>
+    <!-- build:js scripts/main.js-->
+    <script src="scripts/game.js" async></script>
+    <!-- endbuild -->
+  </div>
+</body>
+
+</html>
